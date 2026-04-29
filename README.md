@@ -102,8 +102,10 @@ Wait until upload finishes.
 
 This config uses Push-To-Talk (PTT):
 
-- Press the button → start speaking  
-- Release / stop → assistant responds  
+- Press the KEY1 → start speaking  
+- Release / stop KEY2 → assistant responds
+- Volume from Dashboard HA
+- Lights from Dashboard HA
 
 (No wake word enabled by default)
 
@@ -142,4 +144,4 @@ ESP32 boards always come blank and must be programmed.
 
 ## 👍 If this helped
 
-Leave a helpful Thanks, Bogdan!
+Leave a helpful Thanks, Bogdan! 
