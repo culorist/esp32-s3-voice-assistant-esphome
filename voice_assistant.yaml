@@ -1,0 +1,366 @@
+# Waveshare ESP32-S3-AUDIO + Voice (PTT). Copy this file as-is, then edit ONLY the values on lines marked # (CHANGE) …
+# You do not need to change anything else for identical hardware.
+
+substitutions:
+  name: voice-esp  # (CHANGE) Hostname: lowercase, no spaces. If this is the only device, "voice-esp" is fine; if you already have one, use e.g. voice-esp-2
+  friendly_name: voice-esp  # (CHANGE) Name shown in Home Assistant (can be "Voice ESP" or any label you like)
+  dac_vol_min: "0.08"
+  dac_vol_max: "0.92"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    - priority: 200
+      then:
+        - switch.turn_on: speaker_amp_enable
+        - delay: 200ms
+        - lambda: |-
+            float x = id(speaker_volume_pct).state;
+            float v = ${dac_vol_min}f + (x / 100.0f) * (${dac_vol_max}f - ${dac_vol_min}f);
+            id(es8311_dac).set_volume(v);
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+  flash_size: 16MB
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="  # (CHANGE) Paste YOUR new ESPHome API encryption key here (from ESPHome compile/adopt flow). Not your Home Assistant login password.
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: "YOUR_WIFI_SSID"  # (CHANGE) Your Wi‑Fi name (usually 2.4 GHz)
+  password: "YOUR_WIFI_PASSWORD"  # (CHANGE) Your Wi‑Fi password
+  ap:
+    ssid: "Voice-Esp-Fallback"  # (CHANGE) Optional: hotspot name if Wi‑Fi fails (must be unique if several boards)
+    password: "FallbackPass12"  # (CHANGE) Hotspot password (follow ESPHome minimum length — often 8+ chars)
+
+captive_portal:
+
+i2c:
+  - id: i2c_a
+    sda: GPIO11
+    scl: GPIO10
+    scan: true
+
+tca9555:
+  - id: io_exp
+    i2c_id: i2c_a
+    address: 0x20
+
+audio_dac:
+  - platform: es8311
+    id: es8311_dac
+    i2c_id: i2c_a
+    address: 0x18
+    sample_rate: 16000
+    use_mclk: true
+    bits_per_sample: 16bit
+
+audio_adc:
+  - platform: es7210
+    id: es7210_adc
+    i2c_id: i2c_a
+    address: 0x40
+    sample_rate: 16000
+    mic_gain: 24db
+    bits_per_sample: 16bit
+
+i2s_audio:
+  id: i2s_bus
+  i2s_lrclk_pin: GPIO14
+  i2s_bclk_pin: GPIO13
+  i2s_mclk_pin: GPIO12
+
+microphone:
+  - platform: i2s_audio
+    id: mic
+    i2s_audio_id: i2s_bus
+    i2s_din_pin: GPIO15
+    adc_type: external
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
+speaker:
+  - platform: i2s_audio
+    id: spk
+    i2s_audio_id: i2s_bus
+    i2s_dout_pin: GPIO16
+    dac_type: external
+    audio_dac: es8311_dac
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
+switch:
+  - platform: gpio
+    id: speaker_amp_enable
+    internal: true
+    restore_mode: ALWAYS_ON
+    pin:
+      tca9555: io_exp
+      number: 8
+      mode:
+        output: true
+  - platform: template
+    name: "Lumini asistent"
+    id: va_led_sync
+    icon: mdi:account-voice
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_off:
+      - light.turn_off: led_ring
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: led_ring
+    name: "LED ring"
+    pin: GPIO38
+    num_leds: 7
+    chipset: WS2812
+    rgb_order: RGB
+    default_transition_length: 0ms
+    effects:
+      - pulse:
+          name: "VA listen"
+          transition_length: 450ms
+          update_interval: 450ms
+          min_brightness: 20%
+          max_brightness: 65%
+      - pulse:
+          name: "VA think"
+          transition_length: 140ms
+          update_interval: 140ms
+          min_brightness: 25%
+          max_brightness: 80%
+      - pulse:
+          name: "VA speak"
+          transition_length: 200ms
+          update_interval: 200ms
+          min_brightness: 45%
+          max_brightness: 95%
+
+number:
+  - platform: template
+    name: "Speaker Volume"
+    id: speaker_volume_pct
+    icon: mdi:volume-high
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 40
+    unit_of_measurement: "%"
+    optimistic: true
+    restore_value: true
+    set_action:
+      - lambda: |-
+          float v = ${dac_vol_min}f + (x / 100.0f) * (${dac_vol_max}f - ${dac_vol_min}f);
+          id(es8311_dac).set_volume(v);
+
+button:
+  - platform: template
+    id: vol_up
+    name: "Volum mai tare"
+    icon: mdi:volume-plus
+    on_press:
+      - number.set:
+          id: speaker_volume_pct
+          value: !lambda |-
+            float s = id(speaker_volume_pct).state;
+            if (s < 0.0f || s > 100.0f) s = 40.0f;
+            return s >= 100.0f ? 100.0f : s + 5.0f;
+  - platform: template
+    id: vol_down
+    name: "Volum mai încet"
+    icon: mdi:volume-minus
+    on_press:
+      - number.set:
+          id: speaker_volume_pct
+          value: !lambda |-
+            float s = id(speaker_volume_pct).state;
+            if (s < 0.0f || s > 100.0f) s = 40.0f;
+            return s <= 0.0f ? 0.0f : s - 5.0f;
+  - platform: template
+    id: btn_led_off
+    name: "LED stins"
+    icon: mdi:led-variant-off
+    on_press:
+      - light.turn_off: led_ring
+  - platform: template
+    id: btn_led_white
+    name: "LED alb"
+    icon: mdi:led-variant-on
+    on_press:
+      - light.turn_on:
+          id: led_ring
+          brightness: 100%
+          red: 100%
+          green: 100%
+          blue: 100%
+  - platform: template
+    id: btn_led_red
+    name: "LED rosu"
+    icon: mdi:led-strip-variant
+    on_press:
+      - light.turn_on:
+          id: led_ring
+          brightness: 100%
+          red: 100%
+          green: 0%
+          blue: 0%
+  - platform: template
+    id: btn_led_green
+    name: "LED verde"
+    icon: mdi:led-strip-variant
+    on_press:
+      - light.turn_on:
+          id: led_ring
+          brightness: 100%
+          red: 0%
+          green: 100%
+          blue: 0%
+  - platform: template
+    id: btn_led_blue
+    name: "LED albastru"
+    icon: mdi:led-strip-variant
+    on_press:
+      - light.turn_on:
+          id: led_ring
+          brightness: 100%
+          red: 0%
+          green: 0%
+          blue: 100%
+  - platform: template
+    id: btn_led_orange
+    name: "LED portocaliu"
+    icon: mdi:led-strip-variant
+    on_press:
+      - light.turn_on:
+          id: led_ring
+          brightness: 100%
+          red: 100%
+          green: 55%
+          blue: 0%
+  - platform: template
+    id: btn_led_purple
+    name: "LED violet"
+    icon: mdi:led-strip-variant
+    on_press:
+      - light.turn_on:
+          id: led_ring
+          brightness: 100%
+          red: 60%
+          green: 0%
+          blue: 100%
+
+binary_sensor:
+  - platform: gpio
+    name: "Voice Start"
+    id: voice_key_start
+    pin:
+      tca9555: io_exp
+      number: 9
+      inverted: true
+      mode:
+        input: true
+    on_press:
+      - voice_assistant.stop
+      - delay: 80ms
+      - voice_assistant.start:
+          silence_detection: true
+  - platform: gpio
+    name: "Voice Stop"
+    id: voice_key_stop
+    pin:
+      tca9555: io_exp
+      number: 10
+      inverted: true
+      mode:
+        input: true
+    on_press:
+      - voice_assistant.stop
+
+voice_assistant:
+  microphone: mic
+  speaker: spk
+  use_wake_word: false
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+  on_listening:
+    - if:
+        condition:
+          switch.is_on:
+            id: va_led_sync
+        then:
+          - light.turn_on:
+              id: led_ring
+              brightness: 60%
+              red: 5%
+              green: 30%
+              blue: 100%
+              effect: "VA listen"
+  on_intent_start:
+    - if:
+        condition:
+          switch.is_on:
+            id: va_led_sync
+        then:
+          - light.turn_on:
+              id: led_ring
+              brightness: 58%
+              red: 100%
+              green: 45%
+              blue: 5%
+              effect: "VA think"
+  on_tts_stream_start:
+    - if:
+        condition:
+          switch.is_on:
+            id: va_led_sync
+        then:
+          - light.turn_on:
+              id: led_ring
+              brightness: 82%
+              red: 0%
+              green: 85%
+              blue: 35%
+              effect: "VA speak"
+  on_end:
+    - if:
+        condition:
+          switch.is_on:
+            id: va_led_sync
+        then:
+          - light.turn_on:
+              id: led_ring
+              brightness: 12%
+              red: 20%
+              green: 6%
+              blue: 30%
+              effect: none
+  on_error:
+    - if:
+        condition:
+          switch.is_on:
+            id: va_led_sync
+        then:
+          - light.turn_on:
+              id: led_ring
+              brightness: 50%
+              red: 100%
+              green: 5%
+              blue: 5%
+              effect: none
+
